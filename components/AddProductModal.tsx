@@ -1,16 +1,19 @@
 import { Button, Input } from "@/components";
 import Colors from "@/constants/colors";
 import { supabase } from "@/lib/supabase";
+import { decode } from "base64-arraybuffer";
+import * as ImagePicker from "expo-image-picker";
 import { X } from "lucide-react-native";
 import React, { useState } from "react";
 import {
-    Alert,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Alert,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 interface AddProductModalProps {
@@ -19,10 +22,10 @@ interface AddProductModalProps {
   onSuccess: () => void;
 }
 
-export default function AddProductModal({ 
-  visible, 
+export default function AddProductModal({
+  visible,
   onClose,
-  onSuccess
+  onSuccess,
 }: AddProductModalProps) {
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
@@ -33,25 +36,61 @@ export default function AddProductModal({
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
-    
+
     if (!name.trim()) newErrors.name = "Product name is required";
     if (!price.trim()) {
       newErrors.price = "Price is required";
     } else if (isNaN(Number(price)) || Number(price) <= 0) {
       newErrors.price = "Price must be a positive number";
     }
-    if (!imageUrl.trim()) newErrors.imageUrl = "Image URL is required";
+    if (!imageUrl.trim()) newErrors.imageUrl = "Product image is required";
     if (!description.trim()) newErrors.description = "Description is required";
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
+  const handleImagePick = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [4, 3],
+      base64: true,
+      quality: 0.7,
+    });
+
+    if (!result.canceled) {
+      const file = result.assets[0];
+      const fileExt = file.uri.split(".").pop();
+      const fileName = `product-${Date.now()}.${fileExt}`;
+      const filePath = fileName;
+
+      const { error: uploadError } = await supabase.storage
+        .from("product-images")
+        .upload(filePath, decode(file.base64!), {
+          contentType: file.type ?? "image/jpeg",
+        });
+
+      if (uploadError) {
+        Alert.alert("Upload Error", uploadError.message);
+        return;
+      }
+
+      const { data } = supabase.storage
+        .from("product-images")
+        .getPublicUrl(filePath);
+
+      if (data?.publicUrl) {
+        setImageUrl(data.publicUrl);
+      }
+    }
+  };
+
   const handleSubmit = async () => {
     if (!validate()) return;
-    
+
     setIsLoading(true);
-    
+
     try {
       const { error } = await supabase.from("products").insert({
         name,
@@ -59,19 +98,17 @@ export default function AddProductModal({
         image_url: imageUrl,
         description,
       });
-      
+
       if (error) throw error;
-      
-      // Reset form
+
       setName("");
       setPrice("");
       setImageUrl("");
       setDescription("");
       setErrors({});
-      
+
       onSuccess();
       onClose();
-      
     } catch (error: any) {
       Alert.alert("Error", error.message || "Failed to add product");
     } finally {
@@ -80,11 +117,7 @@ export default function AddProductModal({
   };
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent={true}
-    >
+    <Modal visible={visible} animationType="slide" transparent={true}>
       <View style={styles.modalContainer}>
         <View style={styles.modalContent}>
           <View style={styles.header}>
@@ -93,7 +126,7 @@ export default function AddProductModal({
               <X size={24} color={Colors.light.text} />
             </TouchableOpacity>
           </View>
-          
+
           <ScrollView style={styles.form}>
             <Input
               label="Product Name"
@@ -103,7 +136,7 @@ export default function AddProductModal({
               error={errors.name}
               fullWidth
             />
-            
+
             <Input
               label="Price"
               placeholder="Enter price"
@@ -113,16 +146,21 @@ export default function AddProductModal({
               error={errors.price}
               fullWidth
             />
-            
-            <Input
-              label="Image URL"
-              placeholder="Enter image URL"
-              value={imageUrl}
-              onChangeText={setImageUrl}
-              error={errors.imageUrl}
-              fullWidth
-            />
-            
+
+            <TouchableOpacity onPress={handleImagePick} style={styles.imageUploadButton}>
+              <Text style={styles.imageUploadText}>
+                {imageUrl ? "Change Image" : "Pick Image"}
+              </Text>
+            </TouchableOpacity>
+
+            {imageUrl ? (
+              <Image src={imageUrl} style={styles.previewImage} />
+            ) : null}
+
+            {errors.imageUrl ? (
+              <Text style={{ color: Colors.light.error, marginBottom: 8 }}>{errors.imageUrl}</Text>
+            ) : null}
+
             <Input
               label="Description"
               placeholder="Enter product description"
@@ -135,7 +173,7 @@ export default function AddProductModal({
               style={styles.textArea}
               fullWidth
             />
-            
+
             <Button
               title="Add Product"
               onPress={handleSubmit}
@@ -187,5 +225,22 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     marginTop: 16,
+  },
+  imageUploadButton: {
+    backgroundColor: Colors.light.primary,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  imageUploadText: {
+    color: "#fff",
+    fontWeight: "600",
+  },
+  previewImage: {
+    width: "100%",
+    height: 180,
+    borderRadius: 8,
+    marginBottom: 8,
   },
 });
